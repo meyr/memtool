@@ -7,7 +7,7 @@ else
 GCC=gcc
 endif
 memtool: memtool.c
-	${GCC} $^ -o $@
+	${GCC} $^ -g -ggdb -o $@
 Devmem2: Devmem2.c
 	${GCC} $^ -o $@
 clean:
