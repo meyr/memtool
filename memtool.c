@@ -32,7 +32,7 @@
 uint8_t op_mode;
 uint8_t byteno;
 uint32_t target_address, target_value, page_size;
-uint32_t request_mem_size, alloc_mem_size, page_mask;
+uint32_t request_mem_size, alloc_mem_size, page_mask, request_mem_cnt;
 bool show_binary;
 
 
@@ -46,7 +46,7 @@ void show_info(void)
 	if(target_address != 0) {
 		printf("target address : 0x%x\n", target_address);
 		if(is_read_mode)
-			printf("request size   : %d byte%s\n", request_mem_size * byteno,
+			printf("request size   : %d byte%s\n", request_mem_size,
 					request_mem_size == 1 ? "" : "s");
 	}
 	if(target_value != 0)
@@ -91,10 +91,13 @@ void parse_argument(int argc, const char *argv[])
 			if(p == NULL){
 				op_mode = READ_MODE;
 				target_address = strtol(argv[i], NULL, 16); 
-				if(argv[i+1] != NULL && argv[i+1][0] != '-')
-					request_mem_size = strtol(argv[i+1], NULL, 10);
-				else
+				if(argv[i+1] != NULL && argv[i+1][0] != '-'){
+					request_mem_cnt = strtol(argv[i+1], NULL, 10);
+					request_mem_size = request_mem_cnt * byteno;
+				}else{
+					request_mem_cnt = 1;
 					request_mem_size = 1;
+				}
 			}else{
 				op_mode = WRITE_MODE;
 				target_value = strtol((char *)(p+1), NULL, 16);
@@ -124,31 +127,6 @@ void show_binary_func(void *data, char cnt)
 	printf("\n");
 }
 
-void read_out(void *virt_addr, void *output)
-{
-	int i;
-
-	for (i = 0; i < request_mem_size; i++) {
-		switch(byteno){
-		case 1: 
-			*((uint8_t *)output + i) = *((uint8_t *)virt_addr + i);
-			printf("%0x\n", *((uint8_t *)output + i));
-			break;
-		case 2: 
-			*((uint16_t *)output + i) = (uint16_t *)virt_addr + i;
-			printf("%0x\n", *((uint16_t *)output + i));
-			break;
-		case 4: 
-			*((uint32_t *)output + i) = (uint32_t *)virt_addr + i;
-			printf("%0x\n", *((uint32_t *)output + i));
-			break;
-		default:break;
-		};
-	}
-	
-}
-
-
 void read_func(void *virt_addr)
 {
 	int i;
@@ -156,21 +134,21 @@ void read_func(void *virt_addr)
 	uint16_t *data16;
 	uint32_t *data32;
 
-	for (i = 0; i < request_mem_size; i++) {
+	for (i = 0; i < request_mem_cnt; i++) {
 		switch(byteno){
 		case 1: 
 			data8 = (uint8_t *)virt_addr + i;
-			printf("0x%x = 0x%02x\t", (uint8_t *)target_address + i, *data8);
+			printf("0x%x = 0x%02x\t", target_address + i * byteno, *data8);
 			show_binary_func(data8, 1);
 			break;
 		case 2: 
 			data16 = (uint16_t *)virt_addr + i;
-			printf("0x%x = 0x%04x\t", (uint16_t *)target_address + i, *data16);
+			printf("0x%x = 0x%04x\t", target_address + i * byteno, *data16);
 			show_binary_func(data16, 2);
 			break;
 		case 4: 
 			data32 = (uint32_t *)virt_addr + i;
-			printf("0x%x = 0x%08x\t", (uint32_t *)target_address + i, *data32);
+			printf("0x%x = 0x%08x\t", target_address + i * byteno, *data32);
 			show_binary_func(data32, 4);
 			break;
 		default:break;
@@ -179,18 +157,26 @@ void read_func(void *virt_addr)
 	
 }
 
+#define BYTEMASK(x) ((1 << (8 * x)) - 1)
 void monitor_func(void *address)
 {
-	int size = byteno * request_mem_size;
-	void *value     = malloc(size);
-	void *value_old = malloc(size);
-
+	static uint32_t old_data;
+	uint32_t new_data;
+	static bool init;
 	while(1){
-		read_out(address, value);
-		printf("0x%0x\n", value);
-		usleep(500000);
+		old_data = *((uint32_t *)address) & BYTEMASK(byteno);
+		if(!init) {
+			init = true;
+			continue;
+		}else{
+			usleep(50000);
+			new_data = *((uint32_t *)address) & BYTEMASK(byteno);
+			if(old_data != new_data) {
+				printf("data changed : 0x%0x\t", new_data);
+				show_binary_func(&new_data, byteno);
+			}
+		}
 	}
-
 }
 
 int main(int argc, const char *argv[])
@@ -199,6 +185,7 @@ int main(int argc, const char *argv[])
 	uint8_t *mem_pointer, tmp_pointer;
 	void *virt_addr;
 
+	printf("build time: %s %s\n",__TIME__,__DATE__);
 	page_size = sysconf(_SC_PAGESIZE);
 	page_mask = page_size - 1;
 
