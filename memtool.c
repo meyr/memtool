@@ -51,14 +51,11 @@ void show_help(const char *func_name)
 
 void show_info(void)
 {
-	if(target_address != 0) {
-		printf("target address : 0x%x\n", target_address);
-		if(is_read_mode)
-			printf("request size   : %d byte%s\n", request_mem_size,
-					request_mem_size == 1 ? "" : "s");
-	}
-	if(target_value != 0)
-		printf("target value : 0x%x\n", target_value);
+	printf("target address : 0x%x\n", target_address);
+	if(is_read_mode)
+		printf("request size   : %d byte%s\n", request_mem_size,
+				request_mem_size == 1 ? "" : "s");
+	printf("target value : 0x%x\n", target_value);
 
 	printf("%d bit %s mode\n", byteno * 8,
 			 is_read_mode ? "read" : 
@@ -203,6 +200,25 @@ void monitor_func(void *address)
 	}
 }
 
+void write_func(void *address)
+{
+	uint32_t tmp_value;
+	switch(byteno){
+	case 1  : 
+	case 2  : 
+		tmp_value = *((uint32_t *)address);
+		tmp_value &= ~BYTEMASK(byteno);
+		tmp_value |= target_value;
+		target_value = tmp_value;
+	default : 
+	case 4  : *((uint32_t *)address) = target_value;
+		  break;
+	};
+	printf("read out to verify data\n");
+	request_mem_cnt = 1;
+	read_func(address);
+}
+
 int main(int argc, const char *argv[])
 {
 	int mem_dev;
@@ -244,10 +260,10 @@ int main(int argc, const char *argv[])
 	virt_addr = mem_pointer + (target_address & page_mask);
 
 	switch(op_mode){
-	case READ_MODE : read_func(virt_addr); break;
+	case READ_MODE    : read_func(virt_addr);    break;
 	case MONITOR_MODE : monitor_func(virt_addr); break;
-	case WRITE_MODE : break;
-	default: show_help(argv[0]); break;
+	case WRITE_MODE   : write_func(virt_addr);   break;
+	default           : show_help(argv[0]);      break;
 	};
 	
 
