@@ -28,15 +28,14 @@
   (byte & 0x01 ? 1 : 0) 
 #define READ_MODE	(1 << 1)
 #define WRITE_MODE	(1 << 2)
-#define SHOW_MODE	(1 << 3)
-#define MONITOR_MODE	(1 << 4)
+#define MONITOR_MODE	(1 << 3)
 #define is_read_mode (op_mode == READ_MODE)
 #define is_write_mode (op_mode == WRITE_MODE)
 uint8_t op_mode, bit_position;
 uint8_t byteno;
 uint32_t target_address, target_value, page_size;
 uint32_t request_mem_size, alloc_mem_size, page_mask, request_mem_cnt;
-bool show_binary,bit_mode;
+bool show_binary,bit_mode, show_mode;
 
 
 void show_help(const char *func_name)
@@ -55,7 +54,8 @@ void show_info(void)
 	if(is_read_mode)
 		printf("request size   : %d byte%s\n", request_mem_size,
 				request_mem_size == 1 ? "" : "s");
-	printf("target value : 0x%x\n", target_value);
+	if(is_write_mode)
+		printf("target value : 0x%x\n", target_value);
 
 	printf("%d bit %s mode\n", byteno * 8,
 			 is_read_mode ? "read" : 
@@ -71,7 +71,7 @@ void show_info(void)
 void parse_argument(int argc, const char *argv[])
 {
 	int i;
-	char *p, tmp[16];
+	char *p, *q;
 
 	if(argc == 1){
 		show_help(argv[0]);
@@ -98,8 +98,16 @@ void parse_argument(int argc, const char *argv[])
 		if(argv[i][0] == '0' && argv[i][1] == 'x'){
 			p = strchr(argv[i], '=');
 			if(p == NULL){
+				q = strchr(argv[i], ':');
+				if( q != NULL) {
+					bit_mode = true;
+					bit_position = strtol((char *)(q+1), NULL, 10);
+					*q = '\0';
+				}
+
 				op_mode = READ_MODE;
 				target_address = strtol(argv[i], NULL, 16); 
+
 				if(argv[i+1] != NULL && argv[i+1][0] != '-'){
 					request_mem_cnt = strtol(argv[i+1], NULL, 10);
 					request_mem_size = request_mem_cnt * byteno;
@@ -110,18 +118,20 @@ void parse_argument(int argc, const char *argv[])
 			}else{
 				op_mode = WRITE_MODE;
 				target_value = strtol((char *)(p+1), NULL, 16);
-				memset(tmp, 0, 16);
-				strncpy(tmp, argv[i], abs(p - argv[i]));
-				target_address = strtol(tmp, NULL, 16); 
-			}
-			p = strchr(argv[i], ':');
-			if( p != NULL) {
-				bit_mode = true;
-				bit_position = strtol((char *)(p+1), NULL, 10);
+				*p = '\0';
+
+				q = strchr(argv[i], ':');
+				if( q != NULL) {
+					bit_mode = true;
+					bit_position = strtol((char *)(q+1), NULL, 10);
+					*q = '\0';
+				}
+
+				target_address = strtol(argv[i], NULL, 16); 
 			}
 		}
 		if(strcmp(argv[i], "-s") == 0)
-			op_mode = SHOW_MODE;
+			show_mode = true;
 		if(strcmp(argv[i], "-m") == 0)
 			op_mode = MONITOR_MODE;
 	}
@@ -203,17 +213,27 @@ void monitor_func(void *address)
 void write_func(void *address)
 {
 	uint32_t tmp_value;
-	switch(byteno){
-	case 1  : 
-	case 2  : 
-		tmp_value = *((uint32_t *)address);
-		tmp_value &= ~BYTEMASK(byteno);
-		tmp_value |= target_value;
+
+	tmp_value = *((uint32_t *)address);
+	if(bit_mode){
+		tmp_value &= ~BITMASK(bit_position);
+		tmp_value |= (target_value << bit_position);
 		target_value = tmp_value;
-	default : 
-	case 4  : *((uint32_t *)address) = target_value;
-		  break;
-	};
+	}else{
+		switch(byteno){
+		case 1  : 
+		case 2  : 
+			tmp_value &= ~BYTEMASK(byteno);
+			tmp_value |= target_value;
+			target_value = tmp_value;
+		default : 
+		case 4  : 
+			  break;
+		};
+	}
+
+
+	*((uint32_t *)address) = target_value;
 	printf("read out to verify data\n");
 	request_mem_cnt = 1;
 	read_func(address);
@@ -233,7 +253,7 @@ int main(int argc, const char *argv[])
 
 	alloc_mem_size = (((request_mem_size / page_size) + 1) * page_size);
 
-	if(op_mode == SHOW_MODE){
+	if(show_mode){
 		show_info();
 		exit(0);
 	}
