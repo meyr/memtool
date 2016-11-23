@@ -13,6 +13,9 @@
  *  CONFIG_DEVMEM=y : create virtual device  /dev/mvm
  *  CONFIG_STRICT_DEVMEM=n : do not strict access /dev/mem
  */
+
+#define BYTEMASK(x) ((1 << (8 * x)) - 1)
+#define BITMASK(x) (1 << x)
 #define BYTETOBINARYPATTERN "%d%d%d%d%d%d%d%d"
 #define BYTETOBINARY(byte)  \
   (byte & 0x80 ? 1 : 0), \
@@ -29,16 +32,21 @@
 #define MONITOR_MODE	(1 << 4)
 #define is_read_mode (op_mode == READ_MODE)
 #define is_write_mode (op_mode == WRITE_MODE)
-uint8_t op_mode;
+uint8_t op_mode, bit_position;
 uint8_t byteno;
 uint32_t target_address, target_value, page_size;
 uint32_t request_mem_size, alloc_mem_size, page_mask, request_mem_cnt;
-bool show_binary;
+bool show_binary,bit_mode;
 
 
 void show_help(const char *func_name)
 {
-	printf("usage : %s 0x<address> [<count>]\n", func_name);
+	printf("usage : %s [-8 -16 -32] 0x<address> [<count>] [-b][-m]\n", func_name);
+	printf("  -8  : 8bit mode\n");
+	printf("  -16 : 16bit mode\n");
+	printf("  -32 : 32bit mode\n");
+	printf("   -b : show binary format\n");
+	printf("   -m : monitor data change\n");
 }
 
 void show_info(void)
@@ -57,6 +65,10 @@ void show_info(void)
 			 is_write_mode ? "write" : "");
 	printf("page size : %d\n", page_size);
 	printf("alloc mem size : %d\n", alloc_mem_size);
+	if(bit_mode){
+		printf("bit mode, bit position : %d, bitmask : ", bit_position);
+		printf(BYTETOBINARYPATTERN"\n", BYTETOBINARY(BITMASK(bit_position)));
+	}
 }
 
 void parse_argument(int argc, const char *argv[])
@@ -104,6 +116,11 @@ void parse_argument(int argc, const char *argv[])
 				memset(tmp, 0, 16);
 				strncpy(tmp, argv[i], abs(p - argv[i]));
 				target_address = strtol(tmp, NULL, 16); 
+			}
+			p = strchr(argv[i], ':');
+			if( p != NULL) {
+				bit_mode = true;
+				bit_position = strtol((char *)(p+1), NULL, 10);
 			}
 		}
 		if(strcmp(argv[i], "-s") == 0)
@@ -157,20 +174,27 @@ void read_func(void *virt_addr)
 	
 }
 
-#define BYTEMASK(x) ((1 << (8 * x)) - 1)
+
 void monitor_func(void *address)
 {
 	static uint32_t old_data;
 	uint32_t new_data;
 	static bool init;
+	static uint32_t mask;
+
+	if(bit_mode)
+		mask |= BITMASK(bit_position); 
+	else
+		mask = BYTEMASK(byteno);
+
 	while(1){
-		old_data = *((uint32_t *)address) & BYTEMASK(byteno);
+		old_data = *((uint32_t *)address) & mask;
 		if(!init) {
 			init = true;
 			continue;
 		}else{
 			usleep(50000);
-			new_data = *((uint32_t *)address) & BYTEMASK(byteno);
+			new_data = *((uint32_t *)address) & mask;
 			if(old_data != new_data) {
 				printf("data changed : 0x%0x\t", new_data);
 				show_binary_func(&new_data, byteno);
